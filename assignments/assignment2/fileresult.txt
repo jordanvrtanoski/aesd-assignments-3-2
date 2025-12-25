@@ -1,0 +1,8 @@
+~/coursera/aesd-assignments/finder-app$ make clean
+rm -f ./writer.o writer
+~/coursera/aesd-assignments/finder-app$ make CROSS_COMPILE=aarch64-none-linux-gnu-
+aarch64-none-linux-gnu-gcc -Wall -Wextra -Werror -std=c11 -D_POSIX_C_SOURCE=200809L -c writer.c -o writer.o
+aarch64-none-linux-gnu-gcc -Wall -Wextra -Werror -std=c11 -D_POSIX_C_SOURCE=200809L -o writer writer.o
+~/coursera/aesd-assignments/finder-app$ file writer
+writer: ELF 64-bit LSB executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, for GNU/Linux 3.7.0, with debug_info, not stripped
+
