@@ -1,4 +1,14 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <string.h>
+#include <unistd.h> 
+#include <fcntl.h> 
+#include <syslog.h>
+#include <sys/wait.h>
+
 #include "systemcalls.h"
+
 
 /**
  * @param cmd the command to execute with system()
@@ -17,7 +27,14 @@ bool do_system(const char *cmd)
  *   or false() if it returned a failure
 */
 
-    return true;
+    int ret = system(cmd);
+    
+    // Check if the return code is -1 which means syscall failed 
+    if (ret != -1) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
 /**
@@ -58,10 +75,61 @@ bool do_exec(int count, ...)
  *   as second argument to the execv() command.
  *
 */
+    
+    syslog(LOG_DEBUG, "Starting execution of do_exec");
+    // As we use the va_end at the end of the code, we can not just return from the function
+    // so this will track the return code
+    bool rc = false;
+
+    int pid = fork();
+
+    if (pid == 0) {
+        // This is the child
+        execv(command[0],command);
+
+        // If we are executing this code, something had failed in the exec
+        int err = errno;
+
+         switch (err) {
+             case EACCES:
+                 syslog(LOG_ERR, "Error in access privilegies for the command\n"); 
+                 exit(-1);
+                 break;
+             case ENOENT:
+                 syslog(LOG_ERR, "The command specified is not found\n");
+                 exit(-2);
+                 break;
+             case ENOEXEC:
+                 syslog(LOG_ERR, "The spefified file is not executable\n");
+                 exit(-3);
+                 break;
+             default:
+                 syslog(LOG_ERR, "Error in the excution with return code (%d) %s\n", err, strerror(err));
+                 exit(-4);
+         }
+
+    } else {
+        // This is the parent
+        int child_status;
+        if (waitpid(pid, &child_status, 0) == -1) {
+            int err = errno;
+            syslog(LOG_ERR, "The waitpid() call failed with (%d) %s\n", err, strerror(err));
+            rc = false;
+        } else {
+            if (child_status != 0) {
+                syslog(LOG_ERR, "Child process exited with no zero return code\n");
+                rc = false;
+            } else {
+                // Child returned with exit(0) so it was sucessfull
+                rc = true;
+            }
+        }
+
+    }
 
     va_end(args);
 
-    return true;
+    return rc;
 }
 
 /**
@@ -93,7 +161,98 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *
 */
 
+    // Redirect the file by calling dup2() to replace the stdout. The requiremnt is not telling as what to do with stdin and stderr
+
+    syslog(LOG_DEBUG, "Starting execution of do_exec_redirect");
+    // As we use the va_end at the end of the code, we can not just return from the function
+    // so this will track the return code
+    bool rc = false;
+
+    int pid = fork();
+
+    if (pid == 0) {
+        // This is the child
+        int new_stdout = open(outputfile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (new_stdout == -1) {
+            int err = errno;
+            switch (err) {
+                case EACCES:
+                    syslog(LOG_ERR, "Insufficient priviledges to opening the output file\n");
+                    exit(-1);
+                    break;
+                case ENOENT:
+                    syslog(LOG_ERR, "The path for the output file do not exit\n");
+                    exit(-2);
+                    break;
+                default:
+                    syslog(LOG_ERR, "Error while opening the output file (%d): %s\n",
+                        err, strerror(err));
+                    exit(-5);
+            }
+
+        } else {
+            if (dup2(new_stdout, STDOUT_FILENO) == -1) {
+                int err = errno;
+                switch (err) {
+                    case EBADF:
+                        syslog(LOG_ERR, "Bad file descriptor in call to dup2()\n");
+                        exit(-4);
+                        break;
+                    default:
+                        syslog(LOG_ERR, "Error while duplicating file descriptor with dup2() (%d): %s\n",
+                            err, strerror(err));
+                        exit(-5);
+                }
+            } else {
+                // Close the old stdout
+                close(new_stdout);
+            }
+        }
+
+        // File redirected, execute the command
+        execv(command[0],command);
+
+        // If we are executing this code, something had failed in the exec
+        int err = errno;
+
+         switch (err) {
+             case EACCES:
+                 syslog(LOG_ERR, "Error in access privilegies for the command\n"); 
+                 exit(-1);
+                 break;
+             case ENOENT:
+                 syslog(LOG_ERR, "The command specified is not found\n");
+                 exit(-2);
+                 break;
+             case ENOEXEC:
+                 syslog(LOG_ERR, "The spefified file is not executable\n");
+                 exit(-3);
+                 break;
+             default:
+                 syslog(LOG_ERR, "Error in the excution with return code (%d) %s\n", err, strerror(err));
+                 exit(-5);
+         }
+
+    } else {
+        // This is the parent
+        int child_status;
+        if (waitpid(pid, &child_status, 0) == -1) {
+            int err = errno;
+            syslog(LOG_ERR, "The waitpid() call failed with (%d) %s\n", err, strerror(err));
+            rc = false;
+        } else {
+            if (child_status != 0) {
+                syslog(LOG_ERR, "Child process exited with no zero return code\n");
+                rc = false;
+            } else {
+                // Child returned with exit(0) so it was sucessfull
+                rc = true;
+            }
+        }
+
+    }
+
     va_end(args);
 
-    return true;
+    return rc;
 }
